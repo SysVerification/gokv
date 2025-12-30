@@ -3,12 +3,14 @@ package grove_ffi
 import (
 	"net"
 	"sync"
+	"time"
 )
 
 // UdpSocket represents a connectionless UDP socket
 type udpSocket struct {
-	conn *net.UDPConn
-	mu   *sync.Mutex // guards sending and receiving
+	conn    *net.UDPConn
+	mu      *sync.Mutex       // guards sending and receiving
+	timeout time.Duration     // read timeout (0 means no timeout)
 }
 
 type UdpSocket *udpSocket
@@ -60,6 +62,11 @@ func UdpReceive(sock UdpSocket) UdpReceiveRet {
 	sock.mu.Lock()
 	defer sock.mu.Unlock()
 
+	// Set read deadline if timeout is configured
+	if sock.timeout > 0 {
+		sock.conn.SetReadDeadline(time.Now().Add(sock.timeout))
+	}
+
 	// Allocate maximum UDP packet size
 	buf := make([]byte, 65535)
 	n, addr, err := sock.conn.ReadFromUDP(buf)
@@ -73,6 +80,19 @@ func UdpReceive(sock UdpSocket) UdpReceiveRet {
 		Err:        false,
 		SenderAddr: sender,
 		Data:       buf[:n],
+	}
+}
+
+// UdpConfigTimeout configures the read timeout for the socket
+// duration is in milliseconds (0 means no timeout, block forever)
+func UdpConfigTimeout(sock UdpSocket, duration uint64) {
+	sock.mu.Lock()
+	defer sock.mu.Unlock()
+
+	if duration == 0 {
+		sock.timeout = 0
+	} else {
+		sock.timeout = time.Duration(duration) * time.Millisecond
 	}
 }
 
