@@ -2,15 +2,13 @@ package grove_ffi
 
 import (
 	"net"
-	"sync"
 	"time"
 )
 
 // UdpSocket represents a connectionless UDP socket
 type udpSocket struct {
 	conn    *net.UDPConn
-	mu      *sync.Mutex       // guards sending and receiving
-	timeout time.Duration     // read timeout (0 means no timeout)
+	timeout time.Duration // read timeout (0 means no timeout)
 }
 
 type UdpSocket *udpSocket
@@ -26,7 +24,7 @@ func UdpListen(host Address) UdpSocket {
 		// Assume() no error on Listen
 		panic(err)
 	}
-	return &udpSocket{conn: conn, mu: new(sync.Mutex)}
+	return &udpSocket{conn: conn}
 }
 
 // UdpSend sends data to the specified remote address
@@ -42,9 +40,6 @@ func UdpSend(sock UdpSocket, remote_addr Address, data []byte) bool {
 		Port: int(parsePort(remote_addr)),
 	}
 
-	sock.mu.Lock()
-	defer sock.mu.Unlock()
-
 	_, err := sock.conn.WriteToUDP(data, addr)
 	return err != nil
 }
@@ -59,9 +54,6 @@ type UdpReceiveRet struct {
 // UdpReceive receives a datagram from any sender
 // Returns the sender's address along with the data
 func UdpReceive(sock UdpSocket) UdpReceiveRet {
-	sock.mu.Lock()
-	defer sock.mu.Unlock()
-
 	// Set read deadline if timeout is configured
 	if sock.timeout > 0 {
 		sock.conn.SetReadDeadline(time.Now().Add(sock.timeout))
@@ -83,12 +75,26 @@ func UdpReceive(sock UdpSocket) UdpReceiveRet {
 	}
 }
 
+// UdpReceiveInto receives a datagram into a pre-allocated buffer.
+// Returns (n, err) where n is the number of bytes read.
+// On error (timeout or other), returns (0, true).
+// The caller must provide a buffer large enough for the expected datagram.
+func UdpReceiveInto(sock UdpSocket, buf []byte) (uint64, bool) {
+	// Set read deadline if timeout is configured
+	if sock.timeout > 0 {
+		sock.conn.SetReadDeadline(time.Now().Add(sock.timeout))
+	}
+
+	n, _, err := sock.conn.ReadFromUDP(buf)
+	if err != nil {
+		return 0, true
+	}
+	return uint64(n), false
+}
+
 // UdpConfigTimeout configures the read timeout for the socket
 // duration is in milliseconds (0 means no timeout, block forever)
 func UdpConfigTimeout(sock UdpSocket, duration uint64) {
-	sock.mu.Lock()
-	defer sock.mu.Unlock()
-
 	if duration == 0 {
 		sock.timeout = 0
 	} else {
