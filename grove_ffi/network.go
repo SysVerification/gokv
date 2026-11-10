@@ -81,12 +81,13 @@ func Accept(l Listener) Connection {
 // / Connection
 type connection struct {
 	conn    net.Conn
+	reader  io.Reader
 	send_mu *sync.Mutex // guarding *sending* on `conn`
 	recv_mu *sync.Mutex // guarding *receiving* on `conn`
 }
 
 func makeConnection(conn net.Conn) Connection {
-	return &connection{conn: conn, send_mu: new(sync.Mutex), recv_mu: new(sync.Mutex)}
+	return &connection{conn: conn, reader: makeReceiveReader(conn), send_mu: new(sync.Mutex), recv_mu: new(sync.Mutex)}
 }
 
 type Connection *connection
@@ -137,7 +138,7 @@ func Receive(c Connection) ReceiveRet {
 	// message format: [dataLen] ++ data
 
 	header := make([]byte, 8)
-	_, err := io.ReadFull(c.conn, header)
+	_, err := io.ReadFull(c.reader, header)
 	if err != nil {
 		// Looks like this connection is dead.
 		// This can legitimately happen when the other side "hung up", so do not panic.
@@ -150,7 +151,7 @@ func Receive(c Connection) ReceiveRet {
 	dataLen := d.GetInt()
 
 	data := make([]byte, dataLen)
-	_, err2 := io.ReadFull(c.conn, data)
+	_, err2 := io.ReadFull(c.reader, data)
 	if err2 != nil {
 		// See comment above.
 		c.conn.Close()
